@@ -7,6 +7,7 @@ package org.h2.mvstore;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -723,24 +724,34 @@ public abstract class RandomAccessStore extends FileStore<SFChunk>
         int chunksFillRate = getChunksFillRate();
         int adjustedChunksFillRate = 50 + rewritableChunksFillRate / 2;
         int fillRateToCompare = idle ? rewritableChunksFillRate : adjustedChunksFillRate;
-        if (fillRateToCompare < getTargetFillRate(idle)) {
+        int targetFillRate = getTargetFillRate(idle);
+        System.out.println(String.format("[%s] BEFORE  - idle=%s \tstopIdleHousekeeping=%s \trewritableChunksFillRate=%s \trestoreHousekeepingAtRate=%s \tadjustedChunksFillRate=%s \ttargetFillRate=%s \tchunksFillRate=%s",
+                LocalDateTime.now(), idle, stopIdleHousekeeping, rewritableChunksFillRate, restoreHousekeepingAtRate, adjustedChunksFillRate, targetFillRate, chunksFillRate));
+        if (fillRateToCompare < targetFillRate) {
             mvStore.tryExecuteUnderStoreLock(() -> {
                 int writeLimit = autoCommitMemory;
                 if (!idle) {
                     writeLimit /= 4;
                 }
                 if (rewriteChunks(writeLimit, idle ? adjustedChunksFillRate : rewritableChunksFillRate)) {
+                    System.out.println(String.format("[%s] REWRITE - idle=%s \twriteLimit=%s \trewritableChunksFillRate=%s \tadjustedChunksFillRate=%s",
+                            LocalDateTime.now(), idle, writeLimit, rewritableChunksFillRate, adjustedChunksFillRate));
                     dropUnusedChunks();
                 }
                 return true;
             });
         }
-        stopIdleHousekeeping = idle && getChunksFillRate() < chunksFillRate;
+        int newChunkFillRate = getChunksFillRate();
+        stopIdleHousekeeping = idle && newChunkFillRate < chunksFillRate;
+        int newRewritableChunksFillRate = -1;
         if (stopIdleHousekeeping) {
             // this rate can change with the time, even when database is idle,
             // since chunks become older and may become eligible for re-writing
-            restoreHousekeepingAtRate = getRewritableChunksFillRate() - 2;
+            newRewritableChunksFillRate = getRewritableChunksFillRate();
+            restoreHousekeepingAtRate = newRewritableChunksFillRate - 2;
         }
+        System.out.println(String.format("[%s] AFTER   - idle=%s \tstopIdleHousekeeping=%s \tpreviousRewritableChunksFillRate=%s \tnewRewritableChunksFillRate=%s \trestoreHousekeepingAtRate=%s \tpreviousChunkFillRate=%s \tnewChunkFillRate=%s",
+                LocalDateTime.now(), idle, stopIdleHousekeeping, rewritableChunksFillRate, newRewritableChunksFillRate, restoreHousekeepingAtRate, chunksFillRate, newChunkFillRate));
     }
 
     private int getTargetFillRate(boolean idle) {
